@@ -1,0 +1,15 @@
+[Unit]
+Description=MaggotDrop route on the shared Caddy ingress
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/maggotdrop/ingress.env
+ExecStart=/usr/local/sbin/maggotdrop-ingress
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

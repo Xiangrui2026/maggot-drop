@@ -46,6 +46,14 @@ ssh -N -L 3000:127.0.0.1:3000 user@your-server
 
 使用 HTTPS 反向代理时，让代理转发到主机映射端口，保留 WebSocket 升级，并允许流式传输所需大小的请求。将 `.env` 中的 `MAGGOTDROP_SECURE_COOKIE` 改为 `1`，再用 `docker compose up -d` 应用配置。
 
+生产地址为 [maggot.shitpool.click](https://maggot.shitpool.click)。现有 Caddy 通过专用 Docker 网络转发到 MaggotDrop。生产主机上的 `maggotdrop-ingress.service` 会在 Caddy 容器重新创建时重新接入网络和注册域名。
+
+## CI/CD
+
+GitHub Actions 会检查发往 `main` 的拉取请求及推送。Linux 作业检查格式、lint 和测试，Windows 作业构建客户端并上传 `maggotdrop-windows` 构建产物，Docker 作业验证容器启动、KEY 认证、上传和下载。
+
+`main` 的提交通过检查后，部署作业会使用 GitHub 的 `production` 环境连接生产服务器。该环境使用 `DEPLOY_HOST`、`DEPLOY_KNOWN_HOSTS` 和 `DEPLOY_SSH_KEY`，SSH 公钥在服务器上只能触发 [部署脚本](deploy/deploy-on-host.sh)。脚本构建已检查的提交，再切换容器并等待健康检查。切换失败时会恢复上一版本的镜像和代码，上传文件保存在原数据卷中。也可从 GitHub Actions 页面手动运行 `main` 的流水线。
+
 ## Windows 客户端
 
 将 [client.example.json](client/client.example.json) 复制到客户端 EXE 所在目录并命名为 `client.json`，填写服务端地址和相同的 KEY。

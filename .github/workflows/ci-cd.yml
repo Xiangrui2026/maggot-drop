@@ -1,0 +1,119 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: '1.98.0'
+
+jobs:
+  linux:
+    name: Linux checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Check formatting, lint and test
+        shell: bash
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt,clippy
+          cargo "+$RUST_VERSION" fmt --all --check
+          cargo "+$RUST_VERSION" clippy --locked --workspace --all-targets -- -D warnings
+          cargo "+$RUST_VERSION" test --locked --workspace
+          node --check server/web/app.js
+
+  windows:
+    name: Windows client
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Lint and build
+        shell: pwsh
+        run: |
+          rustup toolchain install $env:RUST_VERSION --profile minimal --component clippy
+          cargo "+$env:RUST_VERSION" clippy --locked --workspace --all-targets -- -D warnings
+          cargo "+$env:RUST_VERSION" build --release --locked --package maggotdrop-client
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: maggotdrop-windows
+          path: |
+            target/release/maggotdrop-client.exe
+            client/client.example.json
+          if-no-files-found: error
+
+  docker:
+    name: Docker smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MAGGOTDROP_KEY: ci-smoke-test
+      MAGGOTDROP_HOST_PORT: 13000
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Build and check the container
+        shell: bash
+        run: |
+          docker compose up --build --detach --wait --wait-timeout 60
+          base=http://127.0.0.1:13000
+          test "$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$base/api/files")" = 401
+          sample=$(mktemp)
+          trap 'rm -f "$sample"' EXIT
+          printf 'MaggotDrop CI upload\n' > "$sample"
+          auth=(--header "Authorization: Bearer $MAGGOTDROP_KEY")
+          entry=$(curl --fail-with-body --silent --show-error "${auth[@]}" --form "file=@$sample;filename=ci.txt" "$base/api/files")
+          path=$(jq --exit-status --raw-output '.download_url' <<< "$entry")
+          curl --fail-with-body --silent --show-error "${auth[@]}" "$base$path" | cmp "$sample" -
+          curl --fail-with-body --silent --show-error "${auth[@]}" "$base/api/files" |
+            jq --exit-status '.files | length == 1'
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose logs
+      - name: Clean up test containers and volume
+        if: always()
+        run: docker compose down --volumes
+
+  deploy:
+    name: Deploy production
+    if: github.ref == 'refs/heads/main' && github.repository == 'Xiangrui2026/maggot-drop'
+    needs: [linux, windows, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions: {}
+    environment: production
+    concurrency:
+      group: maggotdrop-production
+      cancel-in-progress: false
+    steps:
+      - name: Deploy the checked commit
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          test -n "$DEPLOY_SSH_KEY"
+          umask 077
+          ssh_dir=$(mktemp -d)
+          trap 'rm -rf "$ssh_dir"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" | tr -d '\r' > "$ssh_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          ssh -i "$ssh_dir/key" -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
+            -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+            "root@$DEPLOY_HOST" "deploy $GITHUB_SHA"

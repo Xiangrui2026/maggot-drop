@@ -6,7 +6,10 @@ COPY protocol/ ./protocol/
 COPY server/ ./server/
 COPY client/Cargo.toml ./client/
 COPY client/src/ ./client/src/
-RUN cargo build --release --locked --package maggotdrop-server
+RUN --mount=type=cache,id=maggotdrop-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=maggotdrop-cargo-target,target=/build/target,sharing=locked \
+    cargo build --release --locked --package maggotdrop-server \
+    && install -D target/release/maggotdrop-server /out/maggotdrop-server
 
 FROM debian:bookworm-slim
 RUN apt-get update \
@@ -15,7 +18,7 @@ RUN apt-get update \
     && groupadd --system --gid 10001 maggotdrop \
     && useradd --system --uid 10001 --gid maggotdrop --no-create-home maggotdrop \
     && install -d -m 0750 -o maggotdrop -g maggotdrop /data
-COPY --from=build /build/target/release/maggotdrop-server /usr/local/bin/maggotdrop-server
+COPY --from=build /out/maggotdrop-server /usr/local/bin/maggotdrop-server
 ENV MAGGOTDROP_BIND=0.0.0.0:3000 \
     MAGGOTDROP_DATA_DIR=/data
 VOLUME ["/data"]
