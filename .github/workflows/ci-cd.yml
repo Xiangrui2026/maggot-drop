@@ -25,7 +25,7 @@ jobs:
       - name: Check formatting, lint and test
         shell: bash
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt,clippy
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy
           cargo "+$RUST_VERSION" fmt --all --check
           cargo "+$RUST_VERSION" clippy --locked --workspace --all-targets -- -D warnings
           cargo "+$RUST_VERSION" test --locked --workspace
@@ -42,15 +42,16 @@ jobs:
       - name: Lint and build
         shell: pwsh
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
           rustup toolchain install $env:RUST_VERSION --profile minimal --component clippy
           cargo "+$env:RUST_VERSION" clippy --locked --workspace --all-targets -- -D warnings
           cargo "+$env:RUST_VERSION" build --release --locked --package maggotdrop-client
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item target/release/maggotdrop-client.exe, client/client.example.json -Destination dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: maggotdrop-windows
-          path: |
-            target/release/maggotdrop-client.exe
-            client/client.example.json
+          path: dist/
           if-no-files-found: error
 
   docker:
