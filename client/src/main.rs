@@ -3,6 +3,8 @@
 #[cfg(windows)]
 mod network;
 #[cfg(windows)]
+mod popup;
+#[cfg(windows)]
 mod tray;
 
 #[cfg(windows)]

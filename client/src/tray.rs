@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     ptr::{copy_nonoverlapping, null, null_mut},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use anyhow::{Context, Result};
@@ -26,16 +26,18 @@ use windows_sys::Win32::{
     },
     UI::{
         Shell::{
-            DROPFILES, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIIF_INFO, NIM_ADD,
-            NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_BALLOONHIDE, NIN_BALLOONTIMEOUT,
-            NIN_BALLOONUSERCLICK, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
+            DROPFILES, NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE,
+            NIM_MODIFY, NIM_SETVERSION, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
             ShellExecuteW,
         },
         WindowsAndMessaging::*,
     },
 };
 
-use crate::network::{self, ClientConfig, Downloaded};
+use crate::{
+    network::{self, ClientConfig, Downloaded},
+    popup::{self, Popup},
+};
 
 const TRAY_EVENT: u32 = WM_APP + 1;
 const TIMER_ID: usize = 1;
@@ -51,7 +53,8 @@ struct Tray {
     notifications: mpsc::UnboundedReceiver<Downloaded>,
     download_dir: PathBuf,
     pending: VecDeque<Downloaded>,
-    active: Option<(Downloaded, Instant)>,
+    active: Option<Downloaded>,
+    popup: Popup,
     last: Option<PathBuf>,
     taskbar_created: u32,
     registered: bool,
@@ -95,6 +98,7 @@ pub fn run() -> Result<()> {
         return Err(io::Error::last_os_error()).context("无法创建客户端窗口");
     }
 
+    let popup = Popup::new(hwnd, instance)?;
     let download_dir = config.download_dir.clone();
     STATE.with(|state| {
         *state.borrow_mut() = Some(Tray {
@@ -102,6 +106,7 @@ pub fn run() -> Result<()> {
             download_dir: download_dir.clone(),
             pending: VecDeque::new(),
             active: None,
+            popup,
             last: None,
             taskbar_created: unsafe { RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()) },
             registered: register_icon(hwnd),
@@ -145,20 +150,18 @@ unsafe extern "system" fn window_proc(
     }
     if message == TRAY_EVENT {
         match lparam as u32 & 0xffff {
-            NIN_BALLOONUSERCLICK => {
-                if let Some((file, _)) = with_tray(|tray| tray.active.take()).flatten() {
-                    copy_or_report(hwnd, &file.path);
-                }
-            }
-            NIN_BALLOONHIDE | NIN_BALLOONTIMEOUT => {
-                with_tray(|tray| {
-                    tray.active = None;
-                });
-            }
             WM_CONTEXTMENU | WM_RBUTTONUP => tray_menu(hwnd),
             WM_LBUTTONDBLCLK => copy_last(hwnd),
             _ => {}
         }
+        return 0;
+    }
+    if message == popup::POPUP_EVENT {
+        with_tray(|tray| match wparam {
+            popup::COPY => tray.copy_active(hwnd),
+            popup::DISMISS => tray.dismiss(),
+            _ => {}
+        });
         return 0;
     }
     if message == WM_TIMER && wparam == TIMER_ID {
@@ -170,9 +173,6 @@ unsafe extern "system" fn window_proc(
             return false;
         }
         tray.registered = false;
-        if let Some((file, _)) = tray.active.take() {
-            tray.pending.push_front(file);
-        }
         true
     }) == Some(true)
     {
@@ -186,6 +186,24 @@ fn with_tray<T>(action: impl FnOnce(&mut Tray) -> T) -> Option<T> {
 }
 
 impl Tray {
+    fn dismiss(&mut self) {
+        self.active = None;
+        self.popup.hide();
+    }
+
+    fn copy_active(&mut self, hwnd: HWND) {
+        let Some(file) = &self.active else {
+            return;
+        };
+        match copy_file(hwnd, &file.path) {
+            Ok(()) => self.dismiss(),
+            Err(error) => {
+                self.popup.feedback(&format!("{error}，请重试。"));
+                network::log(&self.download_dir, &format!("复制文件失败: {error:#}"));
+            }
+        }
+    }
+
     fn show_next(&mut self, hwnd: HWND) {
         for _ in 0..128 {
             let Ok(file) = self.notifications.try_recv() else {
@@ -194,28 +212,18 @@ impl Tray {
             self.last = Some(file.path.clone());
             self.pending.push_back(file);
         }
-        if let Some((_, requested)) = &self.active {
-            if requested.elapsed() >= Duration::from_secs(60) {
-                // A disabled or unresponsive shell may omit the dismissal callback.
-                let mut icon = icon_data(hwnd);
-                icon.uFlags = NIF_INFO;
-                self.registered = unsafe { Shell_NotifyIconW(NIM_MODIFY, &icon) != 0 };
-                self.active = None;
-            }
-            return;
-        }
         if !self.registered {
             self.registered = register_icon(hwnd);
-            if !self.registered {
-                return;
-            }
         }
-        if let Some(file) = self.pending.pop_front() {
-            self.registered = show_balloon(hwnd, &file.name);
-            if self.registered {
-                self.active = Some((file, Instant::now()));
-            } else {
-                self.pending.push_front(file);
+        if self.active.is_some() {
+            return;
+        }
+        if let Some(file) = self.pending.front() {
+            match self.popup.show(&file.name) {
+                Ok(()) => self.active = self.pending.pop_front(),
+                Err(error) => {
+                    network::log(&self.download_dir, &format!("显示文件弹窗失败: {error:#}"))
+                }
             }
         }
     }
@@ -244,15 +252,6 @@ fn register_icon(hwnd: HWND) -> bool {
     icon.Anonymous.uVersion = NOTIFYICON_VERSION_4;
     unsafe { Shell_NotifyIconW(NIM_SETVERSION, &icon) };
     true
-}
-
-fn show_balloon(hwnd: HWND, filename: &str) -> bool {
-    let mut icon = icon_data(hwnd);
-    icon.uFlags = NIF_INFO;
-    icon.dwInfoFlags = NIIF_INFO;
-    fill_wide(&mut icon.szInfoTitle, "MaggotDrop · 文件已接收");
-    fill_wide(&mut icon.szInfo, &format!("点击复制文件\n{filename}"));
-    unsafe { Shell_NotifyIconW(NIM_MODIFY, &icon) != 0 }
 }
 
 fn tray_menu(hwnd: HWND) {
@@ -437,7 +436,7 @@ pub fn report_error(message: &str) {
     }
 }
 
-fn wide(value: impl AsRef<OsStr>) -> Vec<u16> {
+pub(super) fn wide(value: impl AsRef<OsStr>) -> Vec<u16> {
     value.as_ref().encode_wide().chain([0]).collect()
 }
 
