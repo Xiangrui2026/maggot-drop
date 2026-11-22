@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MaggotDrop 文件中转</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="mark" aria-hidden="true">↓</span> MaggotDrop</div>
+    <button id="logout" type="button" class="quiet" hidden>退出</button>
+  </header>
+  <main>
+    <section id="login-panel" class="panel login" hidden>
+      <h1>文件中转</h1>
+      <form id="login-form">
+        <label for="key">访问 KEY</label>
+        <input id="key" type="password" required autocomplete="current-password">
+        <button type="submit">进入</button>
+      </form>
+      <p id="login-status" role="status"></p>
+    </section>
+    <div id="workspace" hidden>
+      <h1>文件中转</h1>
+      <section class="panel" aria-labelledby="upload-title">
+        <h2 id="upload-title">上传文件</h2>
+        <form id="upload-form" class="upload">
+          <input name="file" id="file" type="file" aria-label="选择要上传的文件" required>
+          <button type="submit">上传</button>
+        </form>
+        <progress id="progress" max="100" hidden aria-label="上传进度"></progress>
+        <p id="upload-status" role="status"></p>
+      </section>
+      <section class="panel" aria-labelledby="files-title">
+        <div class="section-header">
+          <h2 id="files-title">已上传文件</h2>
+          <button id="refresh" type="button" class="quiet">刷新</button>
+        </div>
+        <p id="list-status" role="status"></p>
+        <ul id="files"></ul>
+        <button id="more" type="button" class="quiet" hidden>加载更多</button>
+      </section>
+    </div>
+    <p id="initial-status" role="status">正在连接…</p>
+    <noscript>请启用 JavaScript 后使用文件管理页面。</noscript>
+  </main>
+</body>
+</html>

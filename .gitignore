@@ -1,0 +1,6 @@
+/target/
+/data/
+client.json
+.env
+.env.*
+!.env.example

@@ -1,0 +1,22 @@
+name: maggotdrop
+
+services:
+  server:
+    build: .
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${MAGGOTDROP_HOST_BIND:-127.0.0.1}:${MAGGOTDROP_HOST_PORT:-3000}:3000"
+    environment:
+      MAGGOTDROP_KEY: "${MAGGOTDROP_KEY:?Set MAGGOTDROP_KEY in .env}"
+      MAGGOTDROP_MAX_UPLOAD_BYTES: "${MAGGOTDROP_MAX_UPLOAD_BYTES:-17179869184}"
+      MAGGOTDROP_SECURE_COOKIE: "${MAGGOTDROP_SECURE_COOKIE:-0}"
+    volumes:
+      - data:/data
+
+volumes:
+  data:

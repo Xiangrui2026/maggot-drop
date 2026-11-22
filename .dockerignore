@@ -1,0 +1,17 @@
+**
+!Cargo.toml
+!Cargo.lock
+!protocol/
+!protocol/Cargo.toml
+!protocol/src/
+!protocol/src/**
+!server/
+!server/Cargo.toml
+!server/src/
+!server/src/**
+!server/web/
+!server/web/**
+!client/
+!client/Cargo.toml
+!client/src/
+!client/src/**
