@@ -38,12 +38,6 @@ docker compose ps
 
 容器以普通用户运行，上传文件保存在 Compose 的 `data` 卷中。重新构建或重启容器时会保留数据。Compose 默认只映射服务器的 `127.0.0.1:3000`，可用 `MAGGOTDROP_HOST_PORT` 修改主机端口。
 
-远程使用时，可在本机建立 SSH 隧道，并在浏览器和客户端中使用 `http://127.0.0.1:3000`。
-
-```sh
-ssh -N -L 3000:127.0.0.1:3000 user@your-server
-```
-
 使用 HTTPS 反向代理时，让代理转发到主机映射端口，保留 WebSocket 升级，并允许流式传输所需大小的请求。将 `.env` 中的 `MAGGOTDROP_SECURE_COOKIE` 改为 `1`，再用 `docker compose up -d` 应用配置。
 
 生产地址为 [maggot.shitpool.click](https://maggot.shitpool.click)。现有 Caddy 通过专用 Docker 网络转发到 MaggotDrop。生产主机上的 `maggotdrop-ingress.service` 会在 Caddy 容器重新创建时重新接入网络和注册域名。

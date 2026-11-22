@@ -94,7 +94,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions: {}
-    environment: production
+    environment:
+      name: production
+      url: https://maggot.shitpool.click
     concurrency:
       group: maggotdrop-production
       cancel-in-progress: false
@@ -118,3 +120,9 @@ jobs:
             -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$ssh_dir/known_hosts" \
             -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
             "root@$DEPLOY_HOST" "deploy $GITHUB_SHA"
+      - name: Check the public endpoint
+        shell: bash
+        run: |
+          base=https://maggot.shitpool.click
+          curl --fail-with-body --silent --show-error --max-time 15 "$base/" | grep 'MaggotDrop'
+          test "$(curl --silent --show-error --max-time 15 --output /dev/null --write-out '%{http_code}' "$base/api/files")" = 401

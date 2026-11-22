@@ -45,7 +45,7 @@ reconcile() {
 
 since=$(date -u +%FT%TZ)
 reconcile
-docker events --since "$since" --filter type=container --filter event=start "${labels[@]}" --format '{{.ID}}' |
-    while read -r container; do
+docker events --since "$since" --filter type=container --filter event=start "${labels[@]}" |
+    while IFS= read -r _; do
         reconcile
     done
