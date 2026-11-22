@@ -13,12 +13,12 @@ $env:MAGGOTDROP_KEY
 .\target\release\maggotdrop-server.exe
 ```
 
-打开 [管理页面](http://127.0.0.1:3000/)，输入与 `MAGGOTDROP_KEY` 相同的值。页面支持上传、下载和分页查看历史文件。可在启动服务端前设置以下环境变量。
+打开 [管理页面](http://127.0.0.1:3000/)，输入与 `MAGGOTDROP_KEY` 相同的值。页面支持上传、下载和分页查看有效文件。服务端从上传完成起保留文件 1 小时，到期后自动删除。可在启动服务端前设置以下环境变量。
 
 | 环境变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | `MAGGOTDROP_BIND` | `127.0.0.1:3000` | 监听地址。需要局域网直连时可设置为 `0.0.0.0:3000`。 |
-| `MAGGOTDROP_DATA_DIR` | `./data` | 保存文件和元数据的目录。重启时使用同一个目录可保留历史。 |
+| `MAGGOTDROP_DATA_DIR` | `./data` | 保存文件和元数据的目录。重启后仍按原上传时间计算有效期。 |
 | `MAGGOTDROP_MAX_UPLOAD_BYTES` | `17179869184` | 单文件最大字节数，默认 16 GiB。 |
 | `MAGGOTDROP_SECURE_COOKIE` | 未设置 | 通过 HTTPS 反向代理部署时设为 `1`。 |
 
@@ -36,7 +36,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-容器以普通用户运行，上传文件保存在 Compose 的 `data` 卷中。重新构建或重启容器时会保留数据。Compose 默认只映射服务器的 `127.0.0.1:3000`，可用 `MAGGOTDROP_HOST_PORT` 修改主机端口。
+容器以普通用户运行，上传文件保存在 Compose 的 `data` 卷中。重新构建或重启容器时会保留有效期内的文件。Compose 默认只映射服务器的 `127.0.0.1:3000`，可用 `MAGGOTDROP_HOST_PORT` 修改主机端口。
 
 使用 HTTPS 反向代理时，让代理转发到主机映射端口，保留 WebSocket 升级，并允许流式传输所需大小的请求。将 `.env` 中的 `MAGGOTDROP_SECURE_COOKIE` 改为 `1`，再用 `docker compose up -d` 应用配置。
 

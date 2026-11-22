@@ -81,6 +81,8 @@ async fn main() -> Result<()> {
         secure_cookie: env::var("MAGGOTDROP_SECURE_COOKIE").as_deref() == Ok("1"),
         max_upload_bytes,
     });
+    let expiring_app = app.clone();
+    tokio::spawn(async move { expiring_app.store.expire_files().await });
 
     let protected = Router::new()
         .route(
@@ -302,7 +304,13 @@ async fn download(State(app): State<Arc<App>>, Path(id): Path<Uuid>) -> Result<R
         .store
         .get(id)
         .ok_or_else(|| (StatusCode::NOT_FOUND, "File not found".into()))?;
-    let file = File::open(path).await.map_err(internal)?;
+    let file = File::open(path).await.map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            (StatusCode::NOT_FOUND, "File not found".into())
+        } else {
+            internal(error)
+        }
+    })?;
     let disposition = format!(
         "attachment; filename*=UTF-8''{}",
         utf8_percent_encode(&entry.name, NON_ALPHANUMERIC)
@@ -347,6 +355,7 @@ async fn event_stream(
     mut updates: tokio::sync::watch::Receiver<u64>,
     mut cursor: u64,
 ) {
+    const BATCH_SIZE: usize = 32;
     if !send_event(&mut socket, &Event::Ready { after: cursor }).await {
         return;
     }
@@ -355,11 +364,16 @@ async fn event_stream(
     loop {
         let latest = *updates.borrow_and_update();
         if latest > cursor {
-            for file in app.store.after(cursor, 32) {
+            let batch = app.store.after(cursor, BATCH_SIZE);
+            let exhausted = batch.len() < BATCH_SIZE;
+            for file in batch {
                 cursor = file.sequence;
                 if !send_event(&mut socket, &Event::FileUploaded { file }).await {
                     return;
                 }
+            }
+            if exhausted {
+                cursor = cursor.max(latest);
             }
         }
         tokio::select! {
